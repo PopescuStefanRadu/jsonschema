@@ -175,12 +175,12 @@ func (r *Reflector) ReflectFromType(t reflect.Type) *Schema {
 	name := r.typeName(t)
 
 	s := new(Schema)
-	definitions := Definitions{}
-	s.Definitions = definitions
+	definitions := &Definitions{OrderedMap: NewOrderedMap()}
 	bs := r.reflectTypeToSchemaWithID(definitions, t)
 	if r.ExpandedStruct {
-		*s = *definitions[name]
-		delete(definitions, name)
+		val, _ := definitions.Get(name)
+		*s = *val
+		definitions.Delete(name)
 	} else {
 		*s = *bs
 	}
@@ -201,7 +201,8 @@ func (r *Reflector) ReflectFromType(t reflect.Type) *Schema {
 	}
 
 	s.Version = Version
-	if !r.DoNotReference {
+	// we don't want to serialize an empty Definitions
+	if !r.DoNotReference && definitions.Len() != 0 {
 		s.Definitions = definitions
 	}
 
@@ -235,7 +236,7 @@ func (r *Reflector) SetBaseSchemaID(id string) {
 	r.BaseSchemaID = ID(id)
 }
 
-func (r *Reflector) refOrReflectTypeToSchema(definitions Definitions, t reflect.Type) *Schema {
+func (r *Reflector) refOrReflectTypeToSchema(definitions *Definitions, t reflect.Type) *Schema {
 	id := r.lookupID(t)
 	if id != EmptyID {
 		return &Schema{
@@ -251,7 +252,7 @@ func (r *Reflector) refOrReflectTypeToSchema(definitions Definitions, t reflect.
 	return r.reflectTypeToSchemaWithID(definitions, t)
 }
 
-func (r *Reflector) reflectTypeToSchemaWithID(defs Definitions, t reflect.Type) *Schema {
+func (r *Reflector) reflectTypeToSchemaWithID(defs *Definitions, t reflect.Type) *Schema {
 	s := r.reflectTypeToSchema(defs, t)
 	if s != nil {
 		if r.Lookup != nil {
@@ -264,7 +265,7 @@ func (r *Reflector) reflectTypeToSchemaWithID(defs Definitions, t reflect.Type) 
 	return s
 }
 
-func (r *Reflector) reflectTypeToSchema(definitions Definitions, t reflect.Type) *Schema {
+func (r *Reflector) reflectTypeToSchema(definitions *Definitions, t reflect.Type) *Schema {
 	// only try to reflect non-pointers
 	if t.Kind() == reflect.Ptr {
 		return r.refOrReflectTypeToSchema(definitions, t.Elem())
@@ -352,7 +353,7 @@ func (r *Reflector) reflectTypeToSchema(definitions Definitions, t reflect.Type)
 	return st
 }
 
-func (r *Reflector) reflectCustomSchema(definitions Definitions, t reflect.Type) *Schema {
+func (r *Reflector) reflectCustomSchema(definitions *Definitions, t reflect.Type) *Schema {
 	if t.Kind() == reflect.Ptr {
 		return r.reflectCustomSchema(definitions, t.Elem())
 	}
@@ -371,7 +372,7 @@ func (r *Reflector) reflectCustomSchema(definitions Definitions, t reflect.Type)
 	return nil
 }
 
-func (r *Reflector) reflectSchemaExtend(definitions Definitions, t reflect.Type, s *Schema) *Schema {
+func (r *Reflector) reflectSchemaExtend(definitions *Definitions, t reflect.Type, s *Schema) *Schema {
 	if t.Implements(extendType) {
 		v := reflect.New(t)
 		o := v.Interface().(extendSchemaImpl)
@@ -384,7 +385,7 @@ func (r *Reflector) reflectSchemaExtend(definitions Definitions, t reflect.Type,
 	return s
 }
 
-func (r *Reflector) reflectSliceOrArray(definitions Definitions, t reflect.Type, st *Schema) {
+func (r *Reflector) reflectSliceOrArray(definitions *Definitions, t reflect.Type, st *Schema) {
 	if t == rawMessageType {
 		return
 	}
@@ -410,7 +411,7 @@ func (r *Reflector) reflectSliceOrArray(definitions Definitions, t reflect.Type,
 	}
 }
 
-func (r *Reflector) reflectMap(definitions Definitions, t reflect.Type, st *Schema) {
+func (r *Reflector) reflectMap(definitions *Definitions, t reflect.Type, st *Schema) {
 	r.addDefinition(definitions, t, st)
 
 	st.Type = &Type{Types: []string{"object"}}
@@ -420,9 +421,8 @@ func (r *Reflector) reflectMap(definitions Definitions, t reflect.Type, st *Sche
 
 	switch t.Key().Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		st.PatternProperties = map[string]*Schema{
-			"^[0-9]+$": r.refOrReflectTypeToSchema(definitions, t.Elem()),
-		}
+		st.PatternProperties = NewOrderedMap()
+		_, _ = st.PatternProperties.Set("^[0-9]+$", r.refOrReflectTypeToSchema(definitions, t.Elem()))
 		st.AdditionalProperties = FalseSchema
 		return
 	}
@@ -432,7 +432,7 @@ func (r *Reflector) reflectMap(definitions Definitions, t reflect.Type, st *Sche
 }
 
 // Reflects a struct to a JSON Schema type.
-func (r *Reflector) reflectStruct(definitions Definitions, t reflect.Type, s *Schema) {
+func (r *Reflector) reflectStruct(definitions *Definitions, t reflect.Type, s *Schema) {
 	// Handle special types
 	switch t {
 	case timeType: // date-time RFC section 7.3.1
@@ -447,7 +447,7 @@ func (r *Reflector) reflectStruct(definitions Definitions, t reflect.Type, s *Sc
 
 	r.addDefinition(definitions, t, s)
 	s.Type = &Type{Types: []string{"object"}}
-	s.Properties = NewProperties()
+	s.Properties = NewOrderedMap()
 	s.Description = r.lookupComment(t, "")
 	if r.AssignAnchor {
 		s.Anchor = t.Name()
@@ -468,7 +468,7 @@ func (r *Reflector) reflectStruct(definitions Definitions, t reflect.Type, s *Sc
 	}
 }
 
-func (r *Reflector) reflectStructFields(st *Schema, definitions Definitions, t reflect.Type) {
+func (r *Reflector) reflectStructFields(st *Schema, definitions *Definitions, t reflect.Type) {
 	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
@@ -573,16 +573,16 @@ func (r *Reflector) lookupComment(t reflect.Type, name string) string {
 }
 
 // addDefinition will append the provided schema. If needed, an ID and anchor will also be added.
-func (r *Reflector) addDefinition(definitions Definitions, t reflect.Type, s *Schema) {
+func (r *Reflector) addDefinition(definitions *Definitions, t reflect.Type, s *Schema) {
 	name := r.typeName(t)
 	if name == "" {
 		return
 	}
-	definitions[name] = s
+	definitions.Set(name, s)
 }
 
 // refDefinition will provide a schema with a reference to an existing definition.
-func (r *Reflector) refDefinition(definitions Definitions, t reflect.Type) *Schema {
+func (r *Reflector) refDefinition(definitions *Definitions, t reflect.Type) *Schema {
 	if r.DoNotReference {
 		return nil
 	}
@@ -590,7 +590,7 @@ func (r *Reflector) refDefinition(definitions Definitions, t reflect.Type) *Sche
 	if name == "" {
 		return nil
 	}
-	if _, ok := definitions[name]; !ok {
+	if _, ok := definitions.Get(name); !ok {
 		return nil
 	}
 	return &Schema{

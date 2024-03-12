@@ -271,7 +271,7 @@ func (CustomSliceType) JSONSchema() *Schema {
 type CustomMapType map[string]string
 
 func (CustomMapType) JSONSchema() *Schema {
-	properties := NewProperties()
+	properties := NewOrderedMap()
 	properties.Set("key", &Schema{
 		Type: &Type{Types: []string{"string"}},
 	})
@@ -557,7 +557,7 @@ func TestArrayExtraTags(t *testing.T) {
 
 	r := new(Reflector)
 	schema := r.Reflect(&URIArray{})
-	d := schema.Definitions["URIArray"]
+	d, _ := schema.Definitions.Get("URIArray")
 	require.NotNil(t, d)
 	props := d.Properties
 	require.NotNil(t, props)

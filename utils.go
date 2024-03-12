@@ -19,8 +19,8 @@ func ToSnakeCase(str string) string {
 	return strings.ToLower(snake)
 }
 
-// NewProperties is a helper method to instantiate a new properties ordered
+// NewOrderedMap is a helper method to instantiate a new properties ordered
 // map.
-func NewProperties() *orderedmap.OrderedMap[string, *Schema] {
+func NewOrderedMap() *orderedmap.OrderedMap[string, *Schema] {
 	return orderedmap.New[string, *Schema]()
 }
